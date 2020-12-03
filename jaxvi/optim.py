@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from jaxvi.abstract import ABCMeta, abstract_attribute
+from jaxvi.abstract import ABCMeta
 from typing import Callable, NamedTuple, Tuple
 import jax.numpy as jnp
 

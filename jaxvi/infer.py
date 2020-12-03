@@ -1,8 +1,9 @@
 from typing import Callable, NamedTuple, Tuple
 import jax.numpy as jnp
-from jax.scipy.stats import norm
+from jax.scipy.stats import norm, multivariate_normal
 from jax import jacfwd
 from jax import grad
+from jax.ops import index_update
 
 from jaxvi.models import Model
 
@@ -99,68 +100,43 @@ class FullRankADVI(ADVI):
         """
         super().__init__(model)
         # variational parameters
-        self.K = model.latent_dim
-        self.phi = [jnp.zeros(self.K), jnp.ones(int(self.K * (self.K + 1) / 2))]
+        self.phi = jnp.append(
+            jnp.zeros(self.latent_dim),
+            jnp.ones(int(self.latent_dim * (self.latent_dim + 1) / 2)),
+        )
 
-    def L(self, ϕ):
-        k = ϕ[0].shape[0]
-        L = jnp.zeros((k, k))
-        L = index_update(L, jnp.tril_indices(k), ϕ[1])
+    def L(self, phi: jnp.DeviceArray) -> jnp.DeviceArray:
+        L = jnp.zeros((self.latent_dim, self.latent_dim))
+        L = index_update(L, jnp.tril_indices(self.latent_dim), phi[self.latent_dim :])
         return L
 
-    def inv_L(self, ϕ):
-        L = self.L(ϕ)
-        return jnp.linalg.inv(L)
+    def inv_L(self, phi: jnp.DeviceArray) -> jnp.DeviceArray:
+        L = self.L(phi)
+        return jnp.linalg.inv(L @ L.T)
 
-    def inv_S(self, η, ϕ):
+    def inv_S(self, eta: jnp.DeviceArray, phi: jnp.DeviceArray) -> jnp.DeviceArray:
         """
         Transforms eta to zeta.
         """
-        return (self.L(ϕ) @ η) + ϕ[0]
+        return (self.L(phi) @ eta) + phi[: self.latent_dim]
 
-    def variational_entropy(self, ζ, ϕ):
-        L = self.L(ϕ)
-        probs = multivariate_normal.pdf(ζ, mean=ϕ[0], cov=L @ L.T)
+    def variational_entropy(self, zeta, phi):
+        L = self.L(phi)
+        probs = multivariate_normal.pdf(zeta, mean=phi[: self.latent_dim], cov=L @ L.T)
         return -(probs * jnp.log(probs)).sum()
 
-    def grad(self, η, ϕ):
+    def grad(self, eta, phi):
         """ Returns nabla mu and nabla omega """
-        ζ = self.inv_S(η, ϕ)
-        θ = self.inv_T(ζ)
+        zeta = self.inv_S(eta, phi)
+        theta = self.inv_T(zeta)
 
         # compute gradients
-        grad_joint = self.grad_joint(θ)
-        grad_inv_t = self.jac_T(ζ)
-        grad_trans = self.grad_det_J(ζ)
+        grad_joint = self.grad_joint(theta)
+        grad_inv_t = self.jac_T(zeta)
+        grad_trans = self.grad_det_J(zeta)
 
-        grad_μ = grad_inv_t @ grad_joint + grad_trans
+        grad_mu = grad_inv_t @ grad_joint + grad_trans
         # print(grad_μ, η, grad_μ * η, grad_μ * η.T, self.inv_L(ϕ).T)
-        grad_L = (grad_μ * η + self.inv_L(ϕ).T)[jnp.tril_indices(ϕ[0].shape[0])]
+        grad_L = (grad_mu * eta + self.inv_L(phi).T)[jnp.tril_indices(self.latent_dim)]
 
-        return [grad_μ, grad_L]
-
-    def step(self, i, params):
-        ϕ, g, η, loss = params
-
-        loss = index_update(loss, i, self.elbo(η[i], ϕ))
-        grad_ϕ = self.grad(η[i], ϕ)
-
-        ρ_μ, g_μ = get_learing_rate(grad_ϕ[0], g[0], i, 0.01)
-        ρ_L, g_L = get_learing_rate(grad_ϕ[1], g[1], i, 0.01)
-
-        ϕ_μ = ϕ[0] + ρ_μ * grad_ϕ[0]
-        ϕ_L = ϕ[1] + ρ_L * grad_ϕ[1]  # [jnp.tril_indices(ϕ[0].shape[0])]
-
-        return ([ϕ_μ, ϕ_L], [g_μ, g_L], η, loss)
-
-    def fit(self, num_steps: int = 1000, rng_key: int = 0):
-        η = normal(PRNGKey(rng_key), shape=(num_steps, self.model.latent_dim))
-        ϕ = self.ϕ
-        g = [g ** 2 for g in self.grad(η[0], ϕ)]
-
-        loss = jnp.zeros(num_steps)
-        loss = index_update(loss, 0, self.elbo(η[0], ϕ))
-
-        self.ϕ, _, _, loss = lax.fori_loop(1, num_steps, self.step, (ϕ, g, η, loss))
-
-        return -loss
+        return jnp.append(grad_mu, grad_L)
