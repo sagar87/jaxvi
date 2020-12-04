@@ -9,7 +9,7 @@ from jaxvi.optim import Optimizer, Adam
 
 def fit(
     model: Model,
-    optim: Optimizer = Adam,
+    optim: Optimizer = Adam(),
     infer=ADVI,
     num_steps: int = 1000,
     rng_key: int = 0,

@@ -41,6 +41,14 @@ class ADVI(object):
     def log_abs_det_jacobian(self, zeta: jnp.DeviceArray) -> jnp.DeviceArray:
         return jnp.log(jnp.abs(jnp.linalg.det(self.jac_T(zeta))))
 
+    @property
+    def loc(self):
+        return self.inv_T(self.phi[: self.latent_dim])
+
+    @property
+    def scale(self):
+        return jnp.exp(self.phi[self.latent_dim :])
+
     def mu(self, phi: jnp.DeviceArray) -> jnp.DeviceArray:
         return phi[: self.latent_dim]
 
