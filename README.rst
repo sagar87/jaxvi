@@ -55,6 +55,7 @@ to fit the regression coefficients beta as well as the standard deviation of :co
 we use one of the predefined models of the models module.
 
 .. code-block:: python
+    
     from jaxvi.infer import ADVI, FullRankADVI
     from jaxvi.optim import Default, Adam
     from jaxvi.utils import fit
@@ -65,6 +66,7 @@ by default uses an :code:`Adam` optimiser to fit the passed model. The fit funct
 the optimised model and an array containing the ELBO loss during each step.
 
 .. code-block:: python
+    
     results, loss = fit(lm, num_steps=1000)
 
 
